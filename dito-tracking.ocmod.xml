@@ -1,0 +1,435 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<modification>
+  <name>Dito tracking</name>
+	<code>dito_tracking</code>
+	<version>1.0.0</version>
+	<author>Dito</author>
+	<link>http://www.dito.com.br</link>
+	<file path="catalog/controller/common/footer.php" error="log">
+    <operation>
+			<search><![CDATA[$data['contact'] = $this->url->link('information/contact');]]></search>        
+			<add position="before">
+				<![CDATA[
+					// Dito Tracking 
+					$data['logged'] = $this->customer->isLogged();
+					$user = Array();
+					$data['user_data'] = $user;
+					if ($this->customer->isLogged()) {
+						$this->load->model('account/customer');
+						$customer_id = $this->customer->getId();
+						$customer = $this->model_account_customer->getCustomer($customer_id);
+
+						$user['name'] = $customer['firstname'] . ' ' . $customer['lastname'];
+						$user['email'] = $customer['email'];
+						$user['data']['telefone'] = $customer['telephone'];
+						$user['data']['opt_in_newsletter'] = $customer['newsletter'] ? true : false;
+						$customer_custom_field = json_decode($customer['custom_field'], true);
+						$address_id = $this->customer->getAddressId();
+						$this->load->model('account/address');
+						$address = $this->model_account_address->getAddress($address_id);
+						if($address) {
+							$user['location'] = $address['city'];
+							$user['data']['endereco'] = $address['address_1'];
+							$user['data']['cep'] = $address['postcode'];
+							$user['data']['uf'] = $address['zone_code'];
+						}
+
+						function RemoveSpecialChar($value) {
+							$result  = preg_replace( '/[`^~\'"]/', null, iconv( 'UTF-8', 'ASCII//TRANSLIT', $value ) );
+							$result = str_replace(' ', '_', $result);
+
+							return strtolower($result);
+						}
+
+						// Custom Fields
+						$this->load->model('account/custom_field');
+
+						$custom_fields = $this->model_account_custom_field->getCustomFields();
+						
+						foreach($custom_fields as $field) {
+							if($field['location'] == 'account') {
+								if(strtolower($field['name']) == 'cpf') {
+									$user['id'] = $customer_custom_field[$field['custom_field_id']];
+								}
+								if(isset($customer_custom_field[$field['custom_field_id']])) {
+									$user['data'][RemoveSpecialChar($field['name'])] = $customer_custom_field[$field['custom_field_id']];
+								}
+							}
+						}
+
+						$data['user_data'] = $user;
+					}
+					// End Dito Tracking 
+				]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/model/checkout/order.php" error="log">
+    <operation>
+			<search><![CDATA[public function getOrder($order_id) {]]></search>        
+			<add position="before">
+				<![CDATA[
+						// Dito Tracking
+						public function getOrderProducts($order_id) {
+							$query = $this->db->query("SELECT * FROM " . DB_PREFIX . "order_product WHERE order_id = '" . (int)$order_id . "'");
+
+							return $query->rows;
+						}
+						// End Dito Tracking 
+					]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/controller/checkout/success.php" error="log">
+    <operation>
+			<search><![CDATA[if (isset($this->session->data['order_id'])) {]]></search>        
+			<add position="after">
+				<![CDATA[
+					// Dito Tracking
+					$this->load->model('checkout/order');
+					$order_id = $this->session->data['order_id'];
+					$data['order_data'] = $this->model_checkout_order->getOrder($order_id);
+					error_log(json_encode($data['order_data']));
+					$data['order_data']['products'] = $this->model_checkout_order->getOrderProducts($order_id);
+
+					// Order Totals
+					$data['order_data']['totals'] = array();
+					
+					$order_total_query = $this->db->query("SELECT * FROM `" . DB_PREFIX . "order_total` WHERE order_id = '" . (int)$order_id . "' ORDER BY sort_order ASC");
+		
+					foreach ($order_total_query->rows as $total) {
+						$data['order_data']['totals'][] = array(
+							'title' => $total['title'],
+							'text'  => $this->currency->format($total['value'], $data['order_data']['currency_code'], $data['order_data']['currency_value']),
+						);
+					}
+					// End Dito Tracking 
+				]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/common/footer.tpl" error="log">
+    <operation info="Add identify">
+			<search><![CDATA[</footer>]]></search>        
+			<add position="before">
+					<![CDATA[
+						<!-- Dito tracking -->
+						<?php
+							if ($logged) {
+								$tracking_info = "<script type='text/javascript'>";
+								$tracking_info .=	"	var identifyWaitFor = setInterval(function() {";
+								$tracking_info .=	"		if(window.dito) {";
+								$tracking_info .=	"			clearInterval(identifyWaitFor);";
+								$tracking_info .=	"			dito.identify(" . json_encode($user_data) . ")";
+								$tracking_info .=	"		}";
+								$tracking_info .=	"	}, 100);";
+								$tracking_info .= "</script>";
+
+								print $tracking_info;
+							}
+						?>
+						<!-- END of Dito tracking -->
+					]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/common/home.tpl" error="log">
+    <operation info="Add track acessou-home">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+						<!-- Dito tracking -->
+						<?php
+
+							$tracking_info = "<script type='text/javascript'>";
+							$tracking_info .=	"	var waitFor = setInterval(function() {";
+							$tracking_info .=	"		if(window.dito) {";
+							$tracking_info .=	"			clearInterval(waitFor);";
+							$tracking_info .=	"			dito.track({";
+							$tracking_info .=	"				action: 'acessou-home'";
+							$tracking_info .=	"			});";
+							$tracking_info .=	"		}";
+							$tracking_info .=	"	}, 100);";
+							$tracking_info .= "</script>";
+
+							print $tracking_info;
+						?>
+						<!-- END of Dito tracking -->
+					]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/product/category.tpl" error="log">
+    <operation info="Add track acessou-categoria">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+						<!-- Dito tracking -->
+						<?php
+							$categories = Array();
+
+							foreach($breadcrumbs as $breadcrumb)
+							{
+								if($breadcrumb['text'] != '<i class="fa fa-home"></i>')
+								{
+									array_push($categories, $breadcrumb['text']);
+								}
+							}
+
+							$data = Array();
+							$data['nome_categoria'] = $categories;
+
+							$tracking_info = "<script type='text/javascript'>";
+							$tracking_info .=	"	var waitFor = setInterval(function() {";
+							$tracking_info .=	"		if(window.dito) {";
+							$tracking_info .=	"			clearInterval(waitFor);";
+							$tracking_info .=	"			dito.track({";
+							$tracking_info .=	"				action: 'acessou-categoria',";
+							$tracking_info .=	"				data: " . json_encode($data);
+							$tracking_info .=	"			});";
+							$tracking_info .=	"		}";
+							$tracking_info .=	"	}, 100);";
+							$tracking_info .= "</script>";
+
+							print $tracking_info;
+						?>
+						<!-- END of Dito tracking -->
+					]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/product/product.tpl" error="log">
+    <operation info="Add track acessou-produto">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+					<![CDATA[
+						<!-- Dito tracking -->
+						<?php
+							$categories = Array();
+
+							foreach($breadcrumbs as $breadcrumb)
+							{
+								if($breadcrumb['text'] != '<i class="fa fa-home"></i>')
+								{
+									array_push($categories, $breadcrumb['text']);
+								}
+							}
+
+							$data = Array();
+							$data['id_produto'] = $product_id;
+							$data['categorias_produto'] = $categories;
+							$data['nome_produto'] = $heading_title;
+							$data['preco_produto'] = str_replace('R$', '', $price);
+							$data['modelo'] = $model;
+							$data['marca'] = $manufacturer;
+
+							$tracking_info = "<script type='text/javascript'>";
+							$tracking_info .=	"	var waitFor = setInterval(function() {";
+							$tracking_info .=	"		if(window.dito) {";
+							$tracking_info .=	"			clearInterval(waitFor);";
+							$tracking_info .=	"			dito.track({";
+							$tracking_info .=	"				action: 'acessou-produto',";
+							$tracking_info .=	"				data: " . json_encode($data);
+							$tracking_info .=	"			});";
+							$tracking_info .=	"			var buyBtn = document.querySelector('#button-cart');";
+							$tracking_info .=	"			var variants = $('#product > div.form-group.required');";
+							$tracking_info .=	"			var hasVariants = variants ? variants.length > 0 : false;";
+							$tracking_info .=	"			";
+							$tracking_info .=	"			buyBtn.addEventListener('click', function() {";
+							$tracking_info .=	"			  var shouldTrack = true;";
+							$tracking_info .=	"			";
+							$tracking_info .=	"				setTimeout(function() {";
+							$tracking_info .=	"			  	if (hasVariants) {";
+							$tracking_info .=	"			    	shouldTrack = !(variants.hasClass('has-error'));";
+							$tracking_info .=	"			  	}";
+							$tracking_info .=	"				";
+							$tracking_info .=	"			  	if (shouldTrack) {";
+							$tracking_info .=	"						dito.track({";
+							$tracking_info .=	"							action: 'adicionou-produto-ao-carrinho',";
+							$tracking_info .=	"							data: " . json_encode($data);
+							$tracking_info .=	"						});";
+							$tracking_info .=	"			  	}";
+							$tracking_info .=	"				}, 1500);";
+							$tracking_info .=	"			})";
+							$tracking_info .=	"		}";
+							$tracking_info .=	"	}, 100);";
+							$tracking_info .= "</script>";
+
+							print $tracking_info;
+						?>
+						<!-- END of Dito tracking -->
+					]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/product/search.tpl" error="log">
+    <operation info="Add track buscou-produto">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+					<!-- Dito tracking -->
+					<?php
+
+						$data['termo'] = $search;
+
+						$tracking_info = "<script type='text/javascript'>";
+						$tracking_info .=	"	var waitFor = setInterval(function() {";
+						$tracking_info .=	"		if(window.dito) {";
+						$tracking_info .=	"			clearInterval(waitFor);";
+						$tracking_info .=	"			dito.track({";
+						$tracking_info .=	"				action: 'buscou-produto',";
+						$tracking_info .=	"				data: " . json_encode($data);
+						$tracking_info .=	"			});";
+						$tracking_info .=	"		}";
+						$tracking_info .=	"	}, 100);";
+						$tracking_info .= "</script>";
+
+						print $tracking_info;
+					?>
+					<!-- END of Dito tracking -->
+				]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/checkout/cart.tpl" error="log">
+    <operation info="Add track acessou-carrinho">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+					<!-- Dito tracking -->
+					<?php
+
+						function formatPrice($value) {
+							return str_replace('R$', '', $value);
+						}
+
+						$data = Array();
+						$data['quantidate_produtos'] = sizeof($products);
+						$data['total'] = isset($totals[2]) ? formatPrice($totals[2]['text']) : formatPrice($totals[1]['text']);
+						$data['subtotal'] = formatPrice($totals[0]['text']);
+						$data['total_frete'] = isset($totals[2]) ? formatPrice($totals[1]['text']) : null;
+
+						$tracking_info = "<script type='text/javascript'>";
+						$tracking_info .=	"	var waitFor = setInterval(function() {";
+						$tracking_info .=	"		if(window.dito) {";
+						$tracking_info .=	"			clearInterval(waitFor);";
+						$tracking_info .=	"			dito.track({";
+						$tracking_info .=	"				action: 'acessou-carrinho',";
+						$tracking_info .=	"				data: " . json_encode($data);
+						$tracking_info .=	"			});";
+						$tracking_info .=	"		}";
+						$tracking_info .=	"	}, 100);";
+						$tracking_info .= "</script>";
+
+						print $tracking_info;
+					?>
+					<!-- END of Dito tracking -->
+				]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/checkout/checkout.tpl" error="log">
+    <operation info="Add track acessou-checkout">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+					<!-- Dito tracking -->
+					<?php
+
+						$tracking_info = "<script type='text/javascript'>";
+						$tracking_info .=	"	var waitFor = setInterval(function() {";
+						$tracking_info .=	"		if(window.dito) {";
+						$tracking_info .=	"			clearInterval(waitFor);";
+						$tracking_info .=	"			dito.track({";
+						$tracking_info .=	"				action: 'acessou-checkout'";
+						$tracking_info .=	"			});";
+						$tracking_info .=	"		}";
+						$tracking_info .=	"	}, 100);";
+						$tracking_info .= "</script>";
+
+						print $tracking_info;
+					?>
+					<!-- END of Dito tracking -->
+				]]>
+			</add>
+    </operation>
+	</file>
+	<file path="catalog/view/theme/*/template/common/success.tpl" error="log">
+    <operation info="Add track comprou e comprou-produto">
+			<search><![CDATA[<?php echo $footer; ?>]]></search>        
+			<add position="before">
+				<![CDATA[
+						<!-- Dito tracking -->
+						<?php
+							if(isset($order_data)) {
+								$comprou = Array();
+
+								function formatPrice($value) {
+									$str = str_replace('R$', '', $value);
+									$str = str_replace('.', '', $str);
+									$str = str_replace(',', '.', $str);
+									
+									return $str;
+								}
+
+								$comprou['id_transacao'] = $order_data['order_id'];
+								$comprou['data']['quantidade_produtos'] = sizeof($order_data['products']);
+								$comprou['data']['metodo_pagamento'] = $order_data['payment_method'];
+								$comprou['data']['total'] = isset($order_data['totals'][2]) ? formatPrice($order_data['totals'][2]['text']) : formatPrice($order_data['totals'][1]['text']);
+								$comprou['data']['subtotal'] = formatPrice($order_data['totals'][0]['text']);
+								$comprou['data']['total_frete'] = isset($order_data['totals'][2]) ? formatPrice($order_data['totals'][1]['text']) : null;
+
+								error_log(json_encode($comprou));
+
+								foreach($order_data['products'] as $product) {
+									$products_data[] = array(
+										'id_produto' => $product['product_id'],
+										'nome_produto' => $product['name'],
+										'preco_produto'  => formatPrice($product['total']),
+										'quantidade' => $product['quantity'],
+										'modelo' => $product['model'],
+										'id_transacao' => $order_data['order_id'],
+									);
+								}
+
+								error_log(json_encode($products_data));
+
+								$tracking_info = "<script type='text/javascript'>";
+								$tracking_info .=	"	var buyWaitFor = setInterval(function() {";
+								$tracking_info .=	"		if(window.dito.AppSettings) {";
+								$tracking_info .=	"			clearInterval(buyWaitFor);";
+								$tracking_info .=	"			var apiKey = dito.AppSettings.apiKey;";
+								$tracking_info .=	"			var products = " . json_encode($products_data) . ";";
+								$tracking_info .=	"			products.forEach(function(product) {";
+								$tracking_info .=	"				dito.track({";
+								$tracking_info .=	"					action: 'comprou-produto',";
+								$tracking_info .=	"					message_id: dito.Helpers.sha1(apiKey + product.id_transacao + product.id_produto),";
+								$tracking_info .=	"					data: {";
+								$tracking_info .=	"           id_produto: product.id_produto,";
+								$tracking_info .=	"           quantidade: product.quantidade,";
+								$tracking_info .=	"           nome_produto: product.nome_produto,";
+								$tracking_info .=	"           preco_produto: product.preco_produto,";
+								$tracking_info .=	"           modelo: product.modelo,";
+								$tracking_info .=	"           id_transacao: product.id_transacao";
+								$tracking_info .=	"         }";
+								$tracking_info .=	"				})";
+								$tracking_info .=	"			});";
+								$tracking_info .=	"			dito.track({";
+								$tracking_info .=	"				action: 'comprou',";
+								$tracking_info .=	"				message_id: dito.Helpers.sha1(apiKey + " . $comprou['id_transacao'] . "),";
+								$tracking_info .=	"				revenue: " . $comprou['data']['total'] . ",";
+								$tracking_info .=	"				data: " . json_encode($comprou['data']);
+								$tracking_info .=	"			});";
+								$tracking_info .=	"		}";
+								$tracking_info .=	"	}, 100);";
+								$tracking_info .= "</script>";
+
+								print $tracking_info;
+							}
+						?>
+						<!-- END of Dito tracking -->
+					]]>
+			</add>
+    </operation>
+	</file>
+</modification>
